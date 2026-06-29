@@ -167,13 +167,32 @@ class Shipper:
             provider.force_flush()
 
         def finalize():
-            metrics = [Metric(name=n, description="", unit="", data=Gauge(data_points=pts))
-                       for n, pts in series.data.items() if pts]
-            if metrics:
-                metric_exporter.export(MetricsData(resource_metrics=[ResourceMetrics(
+            # One MetricsData with every datapoint blows past gRPC's 4 MB message
+            # limit on a full backfill (RESOURCE_EXHAUSTED). Export in datapoint-
+            # bounded chunks, preserving metric-name grouping within each chunk.
+            CHUNK = 5000
+            flat = [(n, dp) for n, dps in series.data.items() for dp in dps]
+            failed = 0
+            for i in range(0, len(flat), CHUNK):
+                grouped: dict[str, list] = {}
+                for name, dp in flat[i:i + CHUNK]:
+                    grouped.setdefault(name, []).append(dp)
+                md = MetricsData(resource_metrics=[ResourceMetrics(
                     resource=resource,
-                    scope_metrics=[ScopeMetrics(scope=scope, metrics=metrics, schema_url="")],
-                    schema_url="")]))
+                    scope_metrics=[ScopeMetrics(scope=scope, schema_url="", metrics=[
+                        Metric(name=n, description="", unit="", data=Gauge(data_points=dps))
+                        for n, dps in grouped.items()])],
+                    schema_url="")])
+                try:
+                    metric_exporter.export(md)
+                except Exception as e:  # best-effort; never fail the run on metrics
+                    failed += 1
+                    print(f"WARNING: metric chunk export failed: {e}")
+            if flat:
+                metric_exporter.force_flush(10000)
+                print(f"metrics: exported {len(flat)} datapoints across "
+                      f"{len(series.data)} series"
+                      + (f" ({failed} chunk(s) failed)" if failed else ""))
             provider.shutdown()
 
         return log_emit, series, flush, finalize
