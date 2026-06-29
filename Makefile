@@ -1,4 +1,7 @@
-# prompt-meter — see README.md for the full picture. `make help` lists targets.
+# prompt-meter — Unix dev + CI convenience only (assumes a .venv/bin layout +
+# POSIX tools). END USERS on any OS install the wheel and use the `prompt-meter`
+# CLI instead — see README.md "Install". `make build` is the CI artifact target.
+# `make help` lists targets.
 
 PYTHON   ?= python3
 VENV     ?= .venv

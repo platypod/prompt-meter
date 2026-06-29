@@ -76,20 +76,31 @@ prompt-meter/
 admin "focus on one user" dashboard filters, since the scope proxy overrides
 `owner`). Costs are notional (`tokens × list price`), not a subscription bill.
 
-## Usage
+## Install
+
+`prompt-meter` is a normal Python package — the wheel + CLI work the same on
+**Windows, macOS, and Linux**. CI publishes each tag to **GitHub Releases** (via
+GitHub Actions + `GITHUB_TOKEN`, no PyPI account). Install a tag straight from
+GitHub:
 
 ```sh
-make install                       # venv + editable install (+ dev tools)
-make list-providers
-make dry-run OWNER=dave            # parse only, ship nothing
-make ship   OWNER=dave             # ship using env / ~/.claude/settings.json endpoint
-make ship-dev OWNER=dave           # ship to a local port-forwarded gateway (insecure)
-make setup-claude-hook OWNER=dave  # auto-ship on every Claude Code session close
+pipx install "git+https://github.com/platypod/prompt-meter@v0.1.0"   # isolated, on PATH
+# or:  pip install "git+https://github.com/platypod/prompt-meter@v0.1.0"
 ```
 
-Or directly: `prompt-meter --provider claude-code --owner dave [--dry-run|--reset|--limit N|--metrics-only|--insecure]`.
+Prefer a prebuilt artifact? Every release attaches the wheel — grab
+`prompt_meter-<version>-py3-none-any.whl` from the release page and
+`pipx install ./prompt_meter-*.whl`. Or build one yourself: `make build` (Unix) /
+`python -m build` (any OS) → `dist/`.
 
-### Configuration
+> The **Makefile is a Unix dev / CI convenience only** (it assumes a `.venv/bin`
+> layout and POSIX tools). Windows users don't need it: install the wheel and use
+> the `prompt-meter` CLI (or `python -m promptmeter`) per the sections below.
+
+## Configuration
+
+Set this up **first** — the Usage commands below assume an endpoint is
+resolvable, so configure before you ship.
 
 - **Endpoint / auth**: `--endpoint` / `OTEL_EXPORTER_OTLP_ENDPOINT`, then
   `~/.claude/settings.json` `env` (its `OTEL_*` block) as a fallback.
@@ -100,6 +111,69 @@ Or directly: `prompt-meter --provider claude-code --owner dave [--dry-run|--rese
   (Authorization headers, PEM keys, bearer/token forms).
 - **State**: incremental offset ledger at `~/.promptmeter/state.json`
   (`$PROMPTMETER_STATE`); `--reset` re-ships everything.
+
+### Endpoint examples
+
+**Plaintext, no auth** — e.g. a local port-forward straight to the gateway
+(`kubectl -n dev-platypod port-forward svc/opentelemetry-collector-gateway 4317:4317`):
+
+```sh
+export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+prompt-meter --owner dave --insecure
+```
+
+**TLS + Basic auth** — through the public platypod gateway (Authelia Basic-auth
+LLDAP service account):
+
+```sh
+export OTEL_EXPORTER_OTLP_ENDPOINT=opentelemetry-collector-grpc.platypod.ovh:443
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic $(printf 'user:pass' | base64)"
+prompt-meter --owner dave
+```
+
+On **Windows (PowerShell)** the same vars, with PowerShell's base64:
+
+```powershell
+$env:OTEL_EXPORTER_OTLP_ENDPOINT = "opentelemetry-collector-grpc.platypod.ovh:443"
+$env:OTEL_EXPORTER_OTLP_HEADERS  = "Authorization=Basic " +
+  [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("user:pass"))
+prompt-meter --owner dave        # add --insecure for a plaintext localhost endpoint
+```
+
+If you already run Claude Code's own telemetry, both of these are likely set in
+`~/.claude/settings.json` `env` already — prompt-meter reads them as a fallback,
+so you can skip the exports.
+
+## Usage
+
+Once installed (any OS), drive it with the CLI:
+
+```sh
+prompt-meter --list-providers
+prompt-meter --owner dave --dry-run        # parse only, ship nothing
+prompt-meter --owner dave                  # ship (uses the env configured above)
+prompt-meter --owner dave --reset          # re-ship everything
+```
+
+`python -m promptmeter …` is equivalent. Full flags:
+`--provider claude-code --owner dave [--dry-run|--reset|--limit N|--metrics-only|--insecure]`.
+
+**Auto-ship on every Claude Code session close** — the installed hook command is
+generated for your OS (POSIX `nohup … &` / Windows `start /b`):
+
+```sh
+prompt-meter-hook install --owner dave     # = python -m promptmeter.contrib.claude_hook install
+```
+
+### Unix dev shortcut (Makefile)
+
+On Unix the Makefile wraps the above against a local `.venv` (`make help` lists all):
+
+```sh
+make install          # venv + editable install (+ dev tools)
+make ship OWNER=dave  # = prompt-meter --owner dave
+make build            # build the wheel + sdist into dist/ (the CI artifact target)
+```
 
 ## Adding a provider
 

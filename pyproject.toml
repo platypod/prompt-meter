@@ -1,10 +1,11 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "prompt-meter"
-version = "0.1.0"
+# Version is derived from the git tag by setuptools-scm (see [tool.setuptools_scm]).
+dynamic = ["version"]
 description = "Ship AI coding-assistant usage telemetry (tokens, cost, tools, transcripts) to an OTLP backend — provider-agnostic."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,9 +19,17 @@ dependencies = [
 # Both names resolve to the same CLI.
 prompt-meter = "promptmeter.cli:main"
 promptmeter = "promptmeter.cli:main"
+# Install/print the Claude Code auto-ship hook (OS-aware) — handy on Windows
+# where `make setup-claude-hook` isn't available.
+prompt-meter-hook = "promptmeter.contrib.claude_hook:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools_scm]
+# The git tag is the single source of truth (e.g. tag v0.2.0 → version 0.2.0).
+# fallback_version keeps non-git builds (e.g. an unpacked sdist with no .git) sane.
+fallback_version = "0.0.0"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]

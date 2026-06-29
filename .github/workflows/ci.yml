@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["*"]          # any tag triggers a release (mirrors mediarvester)
+  pull_request:
+
+jobs:
+  # Quality gate: prove the wheel installs and the CLI runs on all three OSes.
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history + tags so setuptools-scm sees the tag
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e '.[dev]'
+      - run: ruff check src
+      - name: CLI smoke test (install + entry points work)
+        run: |
+          prompt-meter --list-providers
+          prompt-meter-hook print --owner ci
+
+  # Publish, modelled on mediarvester's build.yml: triggered by a tag, authed with
+  # the built-in GITHUB_TOKEN (no external secrets). GHCR can't host Python wheels,
+  # so the artifact is the wheel + sdist attached to a GitHub Release for the tag.
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # create the release / upload assets via GITHUB_TOKEN
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history + tags so setuptools-scm sees the tag
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel + sdist
+        run: |
+          pip install build
+          python -m build
+      - name: Attach to the GitHub Release for this tag
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

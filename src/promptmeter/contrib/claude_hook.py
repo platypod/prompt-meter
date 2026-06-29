@@ -13,18 +13,23 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import platform
 import shutil
 import time
 from pathlib import Path
 
 SETTINGS = Path.home() / ".claude" / "settings.json"
+LOG_DIR = Path.home() / ".promptmeter"
 MARKER = "prompt-meter"  # identifies our hook so install stays idempotent
 
 
 def hook_command(owner: str) -> str:
-    # Backgrounded so the gRPC flush never delays the CLI exiting.
-    return (f"nohup prompt-meter --provider claude-code --owner {owner} "
-            f">> ~/.promptmeter/ship.log 2>&1 &")
+    """Detached, OS-appropriate command — the gRPC flush never delays CLI exit."""
+    base = f"prompt-meter --provider claude-code --owner {owner}"
+    if platform.system() == "Windows":
+        # cmd.exe: `start /b` runs detached without a window.
+        return f'start /b "" {base} >> "%USERPROFILE%\\.promptmeter\\ship.log" 2>&1'
+    return f"nohup {base} >> ~/.promptmeter/ship.log 2>&1 &"
 
 
 def hook_entry(owner: str) -> dict:
@@ -50,6 +55,7 @@ def do_install(owner: str) -> None:
         return
     session_end.append(hook_entry(owner))
     SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)  # so the hook's `>>` redirect succeeds
     SETTINGS.write_text(json.dumps(settings, indent=2))
     print(f"installed SessionEnd hook (owner={owner}). Restart Claude Code to load it.")
 
