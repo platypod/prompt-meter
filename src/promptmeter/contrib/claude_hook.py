@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
-import platform
 import shutil
 import time
 from pathlib import Path
@@ -24,12 +23,11 @@ MARKER = "prompt-meter"  # identifies our hook so install stays idempotent
 
 
 def hook_command(owner: str) -> str:
-    """Detached, OS-appropriate command — the gRPC flush never delays CLI exit."""
-    base = f"prompt-meter --provider claude-code --owner {owner}"
-    if platform.system() == "Windows":
-        # cmd.exe: `start /b` runs detached without a window.
-        return f'start /b "" {base} >> "%USERPROFILE%\\.promptmeter\\ship.log" 2>&1'
-    return f"nohup {base} >> ~/.promptmeter/ship.log 2>&1 &"
+    """A plain, **shell-independent** command — `--detach` makes prompt-meter
+    re-launch itself in the background (logging to ~/.promptmeter/ship.log) and
+    return immediately, so the gRPC flush never delays CLI exit and no `nohup &`
+    / `start /b` / redirect (which differ per shell) is needed."""
+    return f"prompt-meter --provider claude-code --owner {owner} --detach"
 
 
 def hook_entry(owner: str) -> dict:

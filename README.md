@@ -158,8 +158,10 @@ prompt-meter --owner dave --reset          # re-ship everything
 `python -m promptmeter …` is equivalent. Full flags:
 `--provider claude-code --owner dave [--dry-run|--reset|--limit N|--metrics-only|--insecure]`.
 
-**Auto-ship on every Claude Code session close** — the installed hook command is
-generated for your OS (POSIX `nohup … &` / Windows `start /b`):
+**Auto-ship on every Claude Code session close** — works on Windows, macOS, and
+Linux. The hook is a plain `prompt-meter … --detach`; the tool re-launches itself
+detached (logging to `~/.promptmeter/ship.log`) and returns instantly, so it never
+delays session close and **doesn't depend on the shell** (no `nohup &` / `start /b`):
 
 ```sh
 prompt-meter-hook install --owner dave     # = python -m promptmeter.contrib.claude_hook install

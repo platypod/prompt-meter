@@ -2,11 +2,38 @@
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 from . import config
 from .providers import get_provider, list_providers
 from .redaction import Redactor
 from .shipper import Shipper
+
+LOG_PATH = Path.home() / ".promptmeter" / "ship.log"
+
+
+def _spawn_detached(argv: list[str]) -> int:
+    """Re-launch ourselves fully detached and return immediately.
+
+    Used by `--detach` so a Claude Code hook fires-and-forgets regardless of the
+    shell (no `nohup &` / `start /b` / redirect needed in the hook command). The
+    child re-runs the exact same args; the PROMPTMETER_DETACHED sentinel stops it
+    from detaching again. stdout/stderr go to the log; stdin is closed.
+    """
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    log = open(LOG_PATH, "ab")
+    kwargs: dict = dict(stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                        env={**os.environ, "PROMPTMETER_DETACHED": "1"}, close_fds=True)
+    if os.name == "nt":
+        kwargs["creationflags"] = (getattr(subprocess, "DETACHED_PROCESS", 0)
+                                   | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    else:
+        kwargs["start_new_session"] = True
+    subprocess.Popen([sys.executable, "-m", "promptmeter", *argv], **kwargs)
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,6 +62,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="emit metrics only (no log lines); leaves the offset ledger untouched")
     p.add_argument("--insecure", action="store_true",
                    help="plaintext gRPC (e.g. a local port-forward to the gateway)")
+    p.add_argument("--detach", action="store_true",
+                   help="fire-and-forget: re-launch detached (logs to ~/.promptmeter/ship.log) "
+                        "and return immediately. Shell-independent; used by the Claude Code hook.")
     p.add_argument("--redact-secret", action="append", default=[], metavar="STR",
                    help="literal secret to redact (repeatable)")
     p.add_argument("--redact-file", action="append", default=[], metavar="PATH",
@@ -51,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
         for name, desc, impl in list_providers():
             print(f"  {name:<14} {desc}{'' if impl else '  [stub]'}")
         return 0
+
+    # Detach early (before endpoint resolution) so the caller returns instantly.
+    if args.detach and os.environ.get("PROMPTMETER_DETACHED") != "1":
+        return _spawn_detached(argv if argv is not None else sys.argv[1:])
 
     cfg = config.load(owner=args.owner, endpoint=args.endpoint,
                       insecure=args.insecure, tenant_prefix=args.tenant_prefix)
