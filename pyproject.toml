@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prompt-meter"
+version = "0.1.0"
+description = "Ship AI coding-assistant usage telemetry (tokens, cost, tools, transcripts) to an OTLP backend — provider-agnostic."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "opentelemetry-sdk>=1.27",
+  "opentelemetry-exporter-otlp-proto-grpc>=1.27",
+]
+
+[project.scripts]
+# Both names resolve to the same CLI.
+prompt-meter = "promptmeter.cli:main"
+promptmeter = "promptmeter.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
