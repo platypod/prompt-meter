@@ -86,8 +86,12 @@ class Shipper:
 
         if not metrics_only:
             flush()
-            state.save()
+        # Metrics must be confirmed before the offset ledger advances — otherwise
+        # a metrics export failure (network blip, etc.) would still mark this
+        # range as shipped, and a rerun would skip it forever instead of retrying.
         finalize()
+        if not metrics_only:
+            state.save()
         print(f"shipped {shipped} records as owner={self.cfg.owner} (tenant {self.cfg.tenant})")
         return shipped
 
@@ -100,6 +104,14 @@ class Shipper:
         attrs = {k: v for k, v in ev.metadata.items() if v}
         attrs.update(provider=ev.provider, project=ev.project,
                      session_title=ev.session_title)
+        # For dashboards that filter/link log lines by tool (e.g. "show me what
+        # Bash did"). Only the tool_use side carries a name; a tool_result only
+        # ever gets tool_use_id back, same asymmetry as the metrics side.
+        if ev.tool_calls:
+            attrs.setdefault("tool_name", ev.tool_calls[0].name)
+            attrs.setdefault("tool_use_id", ev.tool_calls[0].tool_use_id)
+        elif ev.tool_results:
+            attrs.setdefault("tool_use_id", ev.tool_results[0].tool_use_id)
         log_emit(body, attrs, ev.timestamp_ns)
 
     def _otlp(self, host: str):
@@ -110,7 +122,8 @@ class Shipper:
         from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
         from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
         from opentelemetry.sdk.metrics.export import (
-            Gauge, Metric, MetricsData, NumberDataPoint, ResourceMetrics, ScopeMetrics)
+            Gauge, Metric, MetricsData, MetricExportResult, NumberDataPoint,
+            ResourceMetrics, ScopeMetrics)
         from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 
         resource = Resource.create({
@@ -118,8 +131,14 @@ class Shipper:
             "service.namespace": "ai-telemetry",
             "host.name": host,
         })
-        # Logs carry the per-owner Loki tenant; metrics do not (Mimir scopes on `owner`).
+        # Logs carry the per-owner Loki tenant. Metrics claim a coarse, static
+        # theme tenant ("ai") — not per-owner, per-user isolation there is still
+        # the `owner` label + prom-label-proxy (unchanged). This just buys a
+        # storage-level wall between AI telemetry and the rest of the cluster's
+        # metrics, so one can be wiped/rebuilt without touching the other. See
+        # platypod stack/docs/observability/dashboard-multitenancy.md.
         log_headers = dict(self.cfg.headers, **{"x-scope-orgid": self.cfg.tenant})
+        metric_headers = dict(self.cfg.headers, **{"x-scope-orgid": "ai"})
         provider = LoggerProvider(resource=resource)
         log_exporter = OTLPLogExporter(endpoint=self.cfg.endpoint,
                                        headers=tuple(log_headers.items()),
@@ -159,7 +178,7 @@ class Shipper:
         series = Series()
         scope = InstrumentationScope("promptmeter")
         metric_exporter = OTLPMetricExporter(endpoint=self.cfg.endpoint,
-                                             headers=tuple(self.cfg.headers.items()),
+                                             headers=tuple(metric_headers.items()),
                                              insecure=self.cfg.insecure, timeout=30)
 
         def flush():
@@ -183,7 +202,10 @@ class Shipper:
                         for n, dps in grouped.items()])],
                     schema_url="")])
                 try:
-                    metric_exporter.export(md)
+                    result = metric_exporter.export(md)
+                    if result != MetricExportResult.SUCCESS:
+                        failed += 1
+                        print(f"WARNING: metric chunk export failed: result={result}")
                 except Exception as e:  # best-effort; never fail the run on metrics
                     failed += 1
                     print(f"WARNING: metric chunk export failed: {e}")
@@ -191,7 +213,11 @@ class Shipper:
                 metric_exporter.force_flush(10000)
                 print(f"metrics: exported {len(flat)} datapoints across "
                       f"{len(series.data)} series"
-                      + (f" ({failed} chunk(s) failed)" if failed else ""))
+                      + (f" ({failed} chunk(s) failed — see warnings above)" if failed else ""))
+                if failed:
+                    raise RuntimeError(
+                        f"{failed} metric chunk(s) failed to export — rerun to retry "
+                        "(offsets only advance after a fully successful run)")
             provider.shutdown()
 
         return log_emit, series, flush, finalize

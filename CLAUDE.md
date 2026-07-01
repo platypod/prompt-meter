@@ -29,9 +29,12 @@ the things a README reader wouldn't infer.
   re-runs/backfill stop being idempotent and PromQL aggregation breaks.
 - **`fh.tell()` is disabled inside `for line in fh`** — parsers must use a
   `readline()` loop to track resumable byte offsets (see `claude_code.py`).
-- **Logs carry `x-scope-orgid: <tenant>`, metrics do not.** Loki isolates by
-  tenant; Mimir isolates by the `owner` label. Don't add the tenant header to the
-  metric exporter.
+- **Logs carry a per-owner `x-scope-orgid: <tenant>`; metrics carry a fixed
+  `x-scope-orgid: ai`.** Different axes: logs are tenant-isolated per person,
+  metrics are tenant-isolated per *theme* (all AI-assistant telemetry vs. the
+  rest of the cluster's metrics) — per-user metric isolation is still the
+  `owner` label + prom-label-proxy, unchanged. Don't make the metrics tenant
+  per-owner; that's a different, already-solved problem.
 - **Redaction is config-driven on purpose.** Never reintroduce a dependency on any
   specific repo's secret files — it must run on anyone's machine. Add sources via
   the `--redact-*` flags / `Redactor.from_config`.
