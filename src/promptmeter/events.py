@@ -11,11 +11,22 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Usage:
-    """Token counts for one assistant turn."""
+    """Token counts for one assistant turn.
+
+    Cache writes keep the 5-minute/1-hour split because they cost differently
+    (1.25x vs 2x the input rate) — collapsing them loses information pricing
+    needs. `cache_write` is the aggregate, for token-count metrics that don't
+    care about the split.
+    """
     input: int = 0
     output: int = 0
     cache_read: int = 0
-    cache_write: int = 0
+    cache_write_5m: int = 0
+    cache_write_1h: int = 0
+
+    @property
+    def cache_write(self) -> int:
+        return self.cache_write_5m + self.cache_write_1h
 
     def is_empty(self) -> bool:
         return not (self.input or self.output or self.cache_read or self.cache_write)

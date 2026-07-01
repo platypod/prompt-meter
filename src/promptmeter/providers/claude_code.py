@@ -153,14 +153,19 @@ class ClaudeCodeProvider(Provider):
         if ev.role == "assistant":
             u = msg.get("usage") or {}
             cc = u.get("cache_creation") or {}
-            cache_write = ((cc.get("ephemeral_5m_input_tokens", 0) or 0)
-                           + (cc.get("ephemeral_1h_input_tokens", 0) or 0)) or \
-                          (u.get("cache_creation_input_tokens", 0) or 0)
+            # 5m and 1h writes cost differently (1.25x vs 2x input) — keep them
+            # separate. Older transcript shape has only a flat
+            # cache_creation_input_tokens; treat that as a 5m write.
+            w5m = cc.get("ephemeral_5m_input_tokens", 0) or 0
+            w1h = cc.get("ephemeral_1h_input_tokens", 0) or 0
+            if not cc:
+                w5m = u.get("cache_creation_input_tokens", 0) or 0
             ev.usage = Usage(
                 input=u.get("input_tokens", 0) or 0,
                 output=u.get("output_tokens", 0) or 0,
                 cache_read=u.get("cache_read_input_tokens", 0) or 0,
-                cache_write=cache_write,
+                cache_write_5m=w5m,
+                cache_write_1h=w1h,
             )
             if isinstance(content, list):
                 for blk in content:
