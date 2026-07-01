@@ -31,8 +31,15 @@ def _to_epoch_ns(ts: str | None) -> int | None:
 
 
 def _session_titles(path: Path) -> dict[str, str]:
-    """Best-effort map of session_id → a human title (first user prompt)."""
+    """Map of session_id → a human title.
+
+    Prefers Claude Code's own AI-inferred title (``ai-title`` lines, which it
+    keeps refreshed as the session evolves — last one in the file wins). Falls
+    back to the first user prompt, truncated, for sessions too young to have
+    one yet.
+    """
     titles: dict[str, str] = {}
+    fallback: dict[str, str] = {}
     try:
         with path.open() as fh:
             for line in fh:
@@ -41,7 +48,11 @@ def _session_titles(path: Path) -> dict[str, str]:
                 except json.JSONDecodeError:
                     continue
                 sid = o.get("sessionId", "")
-                if sid and sid not in titles and o.get("type") == "user":
+                if not sid:
+                    continue
+                if o.get("type") == "ai-title" and o.get("aiTitle"):
+                    titles[sid] = o["aiTitle"]
+                elif sid not in fallback and o.get("type") == "user":
                     msg = o.get("message", {})
                     content = msg.get("content")
                     text = content if isinstance(content, str) else ""
@@ -51,10 +62,10 @@ def _session_titles(path: Path) -> dict[str, str]:
                             if isinstance(b, dict) and b.get("type") == "text")
                     text = text.strip().replace("\n", " ")
                     if text:
-                        titles[sid] = text[:80]
+                        fallback[sid] = text[:80]
     except OSError:
         pass
-    return titles
+    return {**fallback, **titles}
 
 
 def _render_body(o: dict) -> str:
