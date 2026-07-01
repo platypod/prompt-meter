@@ -61,7 +61,7 @@ class Shipper:
         for session in provider.discover(projects=projects):
             start = state.get(session.key)
             last_offset = start
-            tool_use_times: dict[str, int] = {}
+            tool_use_times: dict[str, tuple[str, int]] = {}
             for offset, ev in provider.parse(session, start_offset=start):
                 if not metrics_only:
                     self._ship_log(ev, log_emit, dry_run)

@@ -17,7 +17,7 @@ from .events import Event
 Emit = Callable[..., None]
 
 
-def derive(ev: Event, owner: str, tool_use_times: dict[str, int], add: Emit) -> None:
+def derive(ev: Event, owner: str, tool_use_times: dict[str, tuple[str, int]], add: Emit) -> None:
     ts = ev.timestamp_ns
     if ts is None:
         return
@@ -46,16 +46,17 @@ def derive(ev: Event, owner: str, tool_use_times: dict[str, int], add: Emit) -> 
         for call in ev.tool_calls:
             counts[call.name] = counts.get(call.name, 0) + 1
             if call.tool_use_id:
-                tool_use_times[call.tool_use_id] = ts
+                tool_use_times[call.tool_use_id] = (call.name, ts)
         for name, n in counts.items():
             add("ai_tx_tool_calls", n, ts, tool_name=name, **base)
 
     elif ev.role == "user":
         for res in ev.tool_results:
-            use_ts = tool_use_times.get(res.tool_use_id)
+            name, use_ts = tool_use_times.get(res.tool_use_id, ("", None))
+            tn = {"tool_name": name} if name else {}
             if res.is_error:
-                add("ai_tx_tool_errors", 1, ts, **base)
+                add("ai_tx_tool_errors", 1, ts, **tn, **base)
             if use_ts is not None and ts >= use_ts:
-                add("ai_tx_tool_latency_seconds", (ts - use_ts) / 1e9, ts, **base)
+                add("ai_tx_tool_latency_seconds", (ts - use_ts) / 1e9, ts, **tn, **base)
         if ev.is_human_turn:
             add("ai_tx_turns", 1, ts, **base)
